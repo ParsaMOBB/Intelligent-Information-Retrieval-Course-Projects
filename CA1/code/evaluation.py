@@ -207,3 +207,42 @@ def evaluate_scoring_method(
     return results
 
 
+def evaluate_average_precision_per_query(
+    inverted_index, scoring_method, queries, relevance_judgments, params=None, min_relevant=3
+):
+    """
+    Return AP for each query individually (used for statistical testing).
+    """
+    if params is None:
+        params = {}
+    ap_per_query = {}
+    for query in queries:
+        scores = scoring_method(query, inverted_index, **params)
+        ranked_docs = sorted(scores.items(), key=lambda x: x[1], reverse=True)
+        retrieved_docs = [doc_id for doc_id, _ in ranked_docs]
+        relevant_docs = relevance_judgments.get(query.query_id, {})
+        ap = EvaluationMetrics.average_precision(retrieved_docs, relevant_docs, min_relevant)
+        ap_per_query[query.query_id] = ap
+    return ap_per_query
+
+
+def compare_with_baseline(baseline_ap, candidate_ap):
+    """
+    Compare per-query APs against a baseline using paired t-test.
+    """
+    shared_queries = sorted(set(baseline_ap.keys()) & set(candidate_ap.keys()))
+    baseline_scores = np.array([baseline_ap[q] for q in shared_queries])
+    candidate_scores = np.array([candidate_ap[q] for q in shared_queries])
+    better = int(np.sum(candidate_scores > baseline_scores))
+    worse = int(np.sum(candidate_scores < baseline_scores))
+    equal = len(shared_queries) - better - worse
+    t_stat, p_value = ttest_rel(candidate_scores, baseline_scores)
+    return {
+        "better": better,
+        "worse": worse,
+        "equal": equal,
+        "candidate_mean_ap": float(np.mean(candidate_scores)),
+        "baseline_mean_ap": float(np.mean(baseline_scores)),
+        "t_stat": float(t_stat),
+        "p_value": float(p_value),
+    }
